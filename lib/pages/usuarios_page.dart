@@ -1,7 +1,14 @@
-import 'package:chat/models/usuario.dart';
-import 'package:chat/services/auth_service.dart';
 import 'package:flutter/material.dart';
+
 import 'package:provider/provider.dart';
+import 'package:pull_to_refresh/pull_to_refresh.dart';
+
+import 'package:chat/models/usuario.dart';
+
+import 'package:chat/services/auth_service.dart';
+import 'package:chat/services/chat_service.dart';
+import 'package:chat/services/socket_service.dart';
+import 'package:chat/services/usuarios_service.dart';
 
 class UsuariosPage extends StatefulWidget {
   const UsuariosPage({super.key});
@@ -11,17 +18,22 @@ class UsuariosPage extends StatefulWidget {
 }
 
 class _UsuariosPageState extends State<UsuariosPage> {
-  final usuarios = [
-    Usuario(online: true, email: 'test1@test.com', nombre: 'Maria', uid: '1'),
-    Usuario(online: true, email: 'test2@test.com', nombre: 'Melissa', uid: '2'),
-    Usuario(
-        online: false, email: 'test3@test.com', nombre: 'Fernando', uid: '3'),
-    Usuario(online: true, email: 'test4@test.com', nombre: 'Ignacio', uid: '4'),
-  ];
+  final usuarioService = UsuariosService();
+  final RefreshController _refreshController =
+      RefreshController(initialRefresh: false);
+
+  List<Usuario> usuarios = [];
+
+  @override
+  void initState() {
+    _cargarUsuarios();
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context);
+    final socketService = Provider.of<SocketService>(context);
     final usuario = authService.usuario;
 
     return Scaffold(
@@ -33,10 +45,9 @@ class _UsuariosPageState extends State<UsuariosPage> {
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 10),
-            child: Icon(
-              Icons.check_circle,
-              color: Colors.blue[400],
-            ),
+            child: socketService.serverStatus == ServerStatus.online
+                ? Icon(Icons.check_circle, color: Colors.blue[400])
+                : const Icon(Icons.offline_bolt, color: Colors.red),
           )
         ],
         elevation: 1,
@@ -47,35 +58,71 @@ class _UsuariosPageState extends State<UsuariosPage> {
             color: Colors.black87,
           ),
           onPressed: () {
-            //TODO: Desconectarnos del socket server
+            socketService.disconnect();
             Navigator.pushReplacementNamed(context, 'login');
             AuthService.deleteToken();
           },
         ),
       ),
-      body: ListView.separated(
-        physics: const BouncingScrollPhysics(),
-        itemBuilder: (context, index) => ListTile(
-          title: Text(usuarios[index].nombre),
-          subtitle: Text(
-            usuarios[index].email,
-            style: const TextStyle(color: Colors.black54),
+      body: SmartRefresher(
+        controller: _refreshController,
+        enablePullDown: true,
+        onRefresh: () => _cargarUsuarios(),
+        header: WaterDropHeader(
+          complete: Icon(
+            Icons.check,
+            color: Colors.blue[400],
           ),
-          leading: CircleAvatar(
-            child: Text(usuarios[index].nombre.substring(0, 2)),
-          ),
-          trailing: Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: usuarios[index].online ? Colors.green[300] : Colors.red,
-              borderRadius: BorderRadius.circular(100),
-            ),
-          ),
+          waterDropColor: Colors.blue[400] ?? Colors.blue,
         ),
-        separatorBuilder: (context, index) => const Divider(),
-        itemCount: usuarios.length,
+        child: _listViewUsuarios(),
       ),
     );
+  }
+
+  Widget _listViewUsuarios() {
+    return ListView.separated(
+      physics: const BouncingScrollPhysics(),
+      itemBuilder: (context, index) => _usuarioListTile(usuarios[index]),
+      separatorBuilder: (context, index) => const Divider(),
+      itemCount: usuarios.length,
+    );
+  }
+
+  Widget _usuarioListTile(Usuario usuario) {
+    return ListTile(
+      title: Text(usuario.nombre),
+      subtitle: Text(
+        usuario.email,
+        style: const TextStyle(color: Colors.black54),
+      ),
+      leading: CircleAvatar(
+        backgroundColor: Colors.blue[100],
+        child: Text(usuario.nombre.substring(0, 2)),
+      ),
+      trailing: Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          color: usuario.online ? Colors.green[300] : Colors.red,
+          borderRadius: BorderRadius.circular(100),
+        ),
+      ),
+      onTap: () {
+        final chatService = Provider.of<ChatService>(context, listen: false);
+
+        chatService.usuarioPara = usuario;
+        Navigator.pushNamed(context, 'chat');
+      },
+    );
+  }
+
+  _cargarUsuarios() async {
+    usuarios = await usuarioService.getUsuarios();
+    setState(() {});
+
+    // await Future.delayed(const Duration(milliseconds: 1000));
+    // if failed,use refreshFailed()
+    _refreshController.refreshCompleted();
   }
 }
